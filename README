@@ -1,3 +1,5 @@
 1. make sure the index.html server url is configured properly
-2. run the docker container 
+2. run the docker container
+a. docker build -t reflect-app .
+b. docker run -p 9912:9912 reflect-app
 3. you can run the index.html with vscode live server extension
