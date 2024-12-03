@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Test</title>
+    <style>
+        video {
+            width: 45%;
+            margin: 2%;
+        }
+
+        #videos {
+            display: flex;
+            justify-content: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>WebRTC Test Client</h1>
+
+    <div id="videos">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <script>
+        const wsUrl = 'ws://localhost:9912/ws';
+
+        let localStream = null;
+        let remoteStream = null;
+        let pc = null;
+        let ws = null;
+
+        // ICE servers configuration
+        const configuration = {
+            sdpSemantics: 'unified-plan',
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        };
+
+        // HTML elements
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        async function init() {
+            try {
+                // Get user media (camera and microphone)
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+
+                // Create RTCPeerConnection
+                pc = new RTCPeerConnection(configuration);
+
+                // Add local tracks to peer connection
+                pc.addTransceiver('video', { direction: 'sendrecv' })
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                // Set up event handlers for the peer connection
+                pc.onicecandidate = handleIceCandidate;
+                pc.ontrack = handleTrack;
+                pc.onconnectionstatechange = handleConnectionStateChange;
+
+                // Create WebSocket connection
+                ws = new WebSocket(wsUrl);
+
+                // WebSocket event handlers
+                ws.onopen = handleWsOpen;
+                ws.onmessage = handleWsMessage;
+                ws.onerror = handleWsError;
+                ws.onclose = handleWsClose;
+
+            } catch (error) {
+                console.error('Error accessing media devices.', error);
+            }
+        }
+
+        // Handle ICE candidates from the peer connection
+        function handleIceCandidate(event) {
+            if (event.candidate) {
+                ws.send(JSON.stringify({
+                    type: 'candidate',
+                    candidate: {
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    }
+                }));
+            }
+        }
+
+        // Handle tracks from the remote peer
+        function handleTrack(event) {
+            console.log('Received remote track:', event.track);
+            remoteVideo.srcObject = event.streams[0];
+        }
+
+        // Handle connection state changes
+        function handleConnectionStateChange() {
+            console.log('Connection state change:', pc.connectionState);
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
+                console.log('Connection closed.');
+                ws.close();
+            }
+        }
+
+        // Handle WebSocket open event
+        function handleWsOpen() {
+            console.log('WebSocket connection established.');
+
+            // Create an offer and send it to the server
+            pc.createOffer()
+                .then(offer => pc.setLocalDescription(offer))
+                .then(() => {
+                    ws.send(JSON.stringify({
+                        type: 'offer',
+                        sdp: pc.localDescription.sdp
+                    }));
+                })
+                .catch(error => console.error('Error creating offer:', error));
+        }
+
+        // Handle messages received from the server
+        function handleWsMessage(event) {
+            const message = JSON.parse(event.data);
+
+            switch (message.type) {
+                case 'answer':
+                    // Set remote description
+                    pc.setRemoteDescription(message)
+                        .then(() => console.log('Remote description set.'))
+                        .catch(error => console.error('Error setting remote description:', error));
+                    break;
+
+                case 'candidate':
+                    // Add ICE candidate
+                    const candidate = new RTCIceCandidate({
+                        sdpMLineIndex: message.candidate.sdpMLineIndex,
+                        sdpMid: message.candidate.sdpMid,
+                        candidate: message.candidate.candidate
+                    });
+                    pc.addIceCandidate(candidate)
+                        .then(() => console.log('ICE candidate added.'))
+                        .catch(error => console.error('Error adding ICE candidate:', error));
+                    break;
+
+                default:
+                    console.log('Unknown message type:', message.type);
+                    break;
+            }
+        }
+
+        // Handle WebSocket error event
+        function handleWsError(error) {
+            console.error('WebSocket error:', error);
+        }
+
+        // Handle WebSocket close event
+        function handleWsClose() {
+            console.log('WebSocket connection closed.');
+        }
+
+        // Initialize the application
+        window.onload = init;
+    </script>
+
+</body>
+
+</html>
