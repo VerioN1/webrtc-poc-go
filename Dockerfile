@@ -1,14 +1,28 @@
-# Use the official Golang image as the build stage
-FROM golang:1.23
+# Use the official Golang image as the base image
+FROM golang:1.23-bullseye
+
+RUN apt-get update 
+RUN apt-get install -y libvpx-dev libogg-dev libvorbis-dev libva-dev ffmpeg
+
+# Install Air for hot reloading from the new repository
+RUN go install github.com/air-verse/air@latest
+
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy the Go source file into the container
-RUN ["go", "install", "github.com/pion/webrtc/v4/examples/reflect@latest"]
-WORKDIR /reflect
-COPY main.go go.sum go.mod index.html ./
-# # Build the Go application
-RUN go mod tidy
-RUN go build
+# Copy go.mod and go.sum to the working directory
+COPY go.mod go.sum ./
 
-CMD ["go", "run", "main.go"]
+# Download dependencies
+RUN go mod download
+
+ENV PKG_CONFIG_PATH=/usr/lib/pkgconfig
+# Copy the rest of the application code
+COPY . .
+
+RUN go get github.com/xlab/libvpx-go/vpx
+# Expose the port your application listens on
+EXPOSE 9912
+
+# Start the application using Air
+CMD ["air", "-c", ".air.toml"]
