@@ -1,4 +1,4 @@
 # .air.toml
 [build]
-cmd = "go build -o ./tmp/main ."
+cmd = "go build -buildvcs=false -o ./tmp/main ."
 bin = "./tmp/main"

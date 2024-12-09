@@ -1,9 +1,11 @@
 package pkg
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"log"
 	"os"
@@ -95,33 +97,33 @@ func (v *VDecoder) Save(savePath string) { //, out chan<- Frame
 
 			draw.Draw(baseImg, wm.Bounds().Add(image.Pt(0, 0)), wm, image.Point{}, draw.Over)
 
-			// i++
-			// buffer := new(bytes.Buffer)
+			i++
+			buffer := new(bytes.Buffer)
 
-			// if err = jpeg.Encode(buffer, baseImg, nil); err != nil {
-			// 	//  panic(err)
-			// 	fmt.Printf("jpeg Encode Error: %s\r\n", err)
-			// }
+			if err = jpeg.Encode(buffer, baseImg, nil); err != nil {
+				//  panic(err)
+				fmt.Printf("jpeg Encode Error: %s\r\n", err)
+			}
 
-			// fo, err := os.Create(fmt.Sprintf("%s%d%s", savePath, i%6, ".jpg"))
-			// if err != nil {
-			// 	fmt.Printf("image create Error: %s\r\n", err)
-			// 	//panic(err)
-			// }
-			// // close fo on exit and check for its returned error
-			// defer func() {
-			// 	if err := fo.Close(); err != nil {
-			// 		panic(err)
-			// 	}
-			// }()
+			fo, err := os.Create(fmt.Sprintf("%s%d%s", savePath, i%6, ".jpg"))
+			if err != nil {
+				fmt.Printf("image create Error: %s\r\n", err)
+				//panic(err)
+			}
+			// close fo on exit and check for its returned error
+			defer func() {
+				if err := fo.Close(); err != nil {
+					panic(err)
+				}
+			}()
 
-			// if _, err := fo.Write(buffer.Bytes()); err != nil {
-			// 	fmt.Printf("image write Error: %s\r\n", err)
-			// 	//panic(err)
-			// }
+			if _, err := fo.Write(buffer.Bytes()); err != nil {
+				fmt.Printf("image write Error: %s\r\n", err)
+				//panic(err)
+			}
 			// wait until the photo is saved to mimic the time it takes for the model the generate the frame
 
-			// fo.Close()
+			fo.Close()
 			v.src <- baseImg
 		}
 	}
