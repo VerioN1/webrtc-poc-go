@@ -23,6 +23,8 @@ type VCodec string
 var (
 	VideoBuilderClient = samplebuilder.New(200, &codecs.VP8Packet{}, 90000)
 	frameResultChan    = make(chan *media.Sample)
+	H264VideoBuilder   = samplebuilder.New(35, &codecs.H264Packet{}, 90000)
+	H264FrameChan      = make(chan *media.Sample)
 )
 
 const (
@@ -174,4 +176,12 @@ func YcbcrToRGBA(ycbcr *image.YCbCr) *image.RGBA {
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, ycbcr, image.Point{}, draw.Src)
 	return rgba
+}
+
+func H264Decoder(pktsChan <-chan *rtp.Packet) {
+	for sample := range H264FrameChan {
+		dataSize := uint32(len(sample.Data))
+
+		fmt.Println("H264Decoder", dataSize)
+	}
 }

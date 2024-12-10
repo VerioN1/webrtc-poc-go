@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"time"
 
 	"github.com/pion/mediadevices/pkg/driver"
 	"github.com/pion/mediadevices/pkg/frame"
@@ -14,6 +15,7 @@ import (
 
 func InitMediaTracker(imgChan <-chan *image.RGBA, i int) {
 	adapter := newResponseMediaAdapter()
+	fmt.Println("adapter", i)
 	adapter.imgChan = imgChan
 	driver.GetManager().Register(adapter, driver.Info{
 		Label:      fmt.Sprintf("ResponseMediaAdapter-%d", i),
@@ -26,6 +28,7 @@ type ResponseMediaAdapter struct {
 	lastFrame *image.RGBA
 	doneCh    chan struct{}
 	imgChan   <-chan *image.RGBA
+	tick      *time.Ticker
 }
 
 func newResponseMediaAdapter() *ResponseMediaAdapter {
@@ -41,7 +44,6 @@ func (a *ResponseMediaAdapter) Close() error {
 	close(a.doneCh)
 	return nil
 }
-
 func (d *ResponseMediaAdapter) VideoRecord(p prop.Media) (video.Reader, error) {
 	colors := [][3]byte{
 		{235, 128, 128},
@@ -74,7 +76,6 @@ func (d *ResponseMediaAdapter) VideoRecord(p prop.Media) (video.Reader, error) {
 			crBase[ci+x/2] = colors[c][2]
 		}
 	}
-
 	for y := hColorBarEnd; y < p.Height; y++ {
 		yi := p.Width * y
 		ci := p.Width * y / 2
@@ -92,40 +93,38 @@ func (d *ResponseMediaAdapter) VideoRecord(p prop.Media) (video.Reader, error) {
 	}
 	random := rand.New(rand.NewSource(0))
 
+	tick := time.NewTicker(time.Duration(float32(time.Second) / p.FrameRate))
+	d.tick = tick
 	closed := d.doneCh
-	hasReturnedDefault := false
+
 	r := video.ReaderFunc(func() (image.Image, func(), error) {
-		if !hasReturnedDefault {
-			hasReturnedDefault = true
-			copy(yy, yyBase)
-			copy(cb, cbBase)
-			copy(cr, crBase)
-			for y := hColorBarEnd; y < p.Height; y++ {
-				yi := p.Width * y
-				for x := wGradationEnd; x < p.Width; x++ {
-					// Noise
-					yy[yi+x] = uint8(random.Int31n(2) * 255)
-				}
-			}
-			return &image.YCbCr{
-				Y:              yy,
-				YStride:        p.Width,
-				Cb:             cb,
-				Cr:             cr,
-				CStride:        p.Width / 2,
-				SubsampleRatio: image.YCbCrSubsampleRatio422,
-				Rect:           image.Rect(0, 0, p.Width, p.Height),
-			}, func() {}, nil
-		}
 		select {
 		case <-closed:
-			fmt.Println("done videoooooooooooo")
 			return nil, func() {}, io.EOF
-
-		case nimg := <-d.imgChan:
-			// Received an image from the imgChan
-			return nimg, func() {}, nil
+		default:
 		}
+
+		<-tick.C
+
+		copy(yy, yyBase)
+		copy(cb, cbBase)
+		copy(cr, crBase)
+		for y := hColorBarEnd; y < p.Height; y++ {
+			yi := p.Width * y
+			for x := wGradationEnd; x < p.Width; x++ {
+				// Noise
+				yy[yi+x] = uint8(random.Int31n(2) * 255)
+			}
+		}
+		return &image.YCbCr{
+			Y:              yy,
+			YStride:        p.Width,
+			Cb:             cb,
+			Cr:             cr,
+			CStride:        p.Width / 2,
+			SubsampleRatio: image.YCbCrSubsampleRatio422,
+			Rect:           image.Rect(0, 0, p.Width, p.Height),
+		}, func() {}, nil
 	})
 
 	return r, nil
