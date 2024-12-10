@@ -122,7 +122,7 @@ func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription
 		}
 
 		// Now handle incoming track and write samples to localVideoTrack
-		s.handleIncomingTrackWithPLI(t, *pc, stop, localVideoTrack, nil)
+		s.handleIncomingTrackWithPLI(t, stop, localVideoTrack, nil)
 		// } else if t.Kind() == webrtc.RTPCodecTypeAudio {
 		// 	// Create a local audio track to send back data
 		// 	localAudioTrack, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
@@ -160,7 +160,7 @@ func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription
 }
 
 // This version handles PLI channel and can forward incoming tracks to local tracks if provided
-func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, pc *webrtc.PeerConnection, stop chan int, videoTrack *webrtc.TrackLocalStaticSample, audioTrack *webrtc.TrackLocalStaticRTP) {
+func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop chan int, videoTrack *webrtc.TrackLocalStaticSample, audioTrack *webrtc.TrackLocalStaticRTP) {
 	if t.Codec().MimeType == webrtc.MimeTypeVP8 ||
 		t.Codec().MimeType == webrtc.MimeTypeVP9 ||
 		t.Codec().MimeType == webrtc.MimeTypeH264 {
@@ -175,7 +175,7 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, pc *web
 			pkt = &codecs.H264Packet{}
 		}
 
-		builder := samplebuilder.New(35, pkt, t.Codec().ClockRate)
+		builder := samplebuilder.New(31, pkt, t.Codec().ClockRate)
 		for {
 			select {
 			case <-stop:
@@ -192,7 +192,7 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, pc *web
 					if videoTrack != nil {
 						if sample.Duration == 0 {
 							// Assuming ~30fps, use ~33ms per frame as a fallback
-							sample.Duration = time.Millisecond * 40
+							sample.Duration = time.Millisecond * 33
 						}
 
 						fmt.Println("WriteSample", sample.Duration.Milliseconds())

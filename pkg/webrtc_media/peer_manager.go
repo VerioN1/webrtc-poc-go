@@ -45,8 +45,7 @@ func NewWebRTCPeer(id string) *WebRTCPeer {
 }
 
 func (p *WebRTCPeer) Stop() {
-	fmt.Println("WebRTCPeer.Stop", p)
-	if p.PC != nil {
+	if p != nil && p.PC != nil {
 		p.PC.Close()
 	}
 	close(p.stop)

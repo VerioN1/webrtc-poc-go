@@ -112,8 +112,8 @@ func websocketServer(w http.ResponseWriter, r *http.Request) {
 			fmt.Println("Unknown message type:", message.Type)
 		}
 	}, func() {
-
 		peersManagers.RemovePeer(connectionID)
+		cancel()
 	})
 
 	// go func() {
