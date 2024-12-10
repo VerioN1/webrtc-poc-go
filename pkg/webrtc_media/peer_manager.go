@@ -12,9 +12,9 @@ type WebRTCPeer struct {
 	ID         string
 	PC         *webrtc.PeerConnection
 	VideoTrack *webrtc.TrackLocalStaticSample
-	AudioTrack *webrtc.TrackLocalStaticRTP
-	stop       chan int
-	pli        chan int
+	// AudioTrack *webrtc.TrackLocalStaticRTP
+	stop chan int
+	pli  chan int
 }
 
 var (
@@ -45,14 +45,17 @@ func NewWebRTCPeer(id string) *WebRTCPeer {
 }
 
 func (p *WebRTCPeer) Stop() {
-	p.PC.Close()
+	fmt.Println("WebRTCPeer.Stop", p)
+	if p.PC != nil {
+		p.PC.Close()
+	}
 	close(p.stop)
 	close(p.pli)
 }
 
 func (p *WebRTCPeer) AnswerSender(offer webrtc.SessionDescription) (answer webrtc.SessionDescription, err error) {
 	fmt.Println("WebRTCPeer.AnswerSender")
-	return webrtcEngine.CreateSenderReciverClient(offer, &p.PC, &p.VideoTrack, &p.AudioTrack, p.stop, p.pli)
+	return webrtcEngine.CreateSenderReciverClient(offer, &p.PC, &p.VideoTrack, p.stop)
 }
 
 func (p *WebRTCPeer) SendPLI() {

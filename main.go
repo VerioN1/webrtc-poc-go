@@ -114,13 +114,12 @@ func websocketServer(w http.ResponseWriter, r *http.Request) {
 	}, func() {
 
 		peersManagers.RemovePeer(connectionID)
-
 	})
 
-	go func() {
-		time.Sleep(5 * time.Minute)
-		cancel()
-	}()
+	// go func() {
+	// 	time.Sleep(5 * time.Minute)
+	// 	cancel()
+	// }()
 
 	<-ctx.Done()
 
