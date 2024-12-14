@@ -39,7 +39,6 @@ type encodedFrame struct {
 type WebRTCEngine struct {
 	cfg         webrtc.Configuration
 	mediaEngine webrtc.MediaEngine
-	api         *webrtc.API
 }
 
 func NewWebRTCEngine() *WebRTCEngine {
@@ -47,54 +46,21 @@ func NewWebRTCEngine() *WebRTCEngine {
 		mediaEngine: webrtc.MediaEngine{},
 		cfg:         defaultPeerCfg,
 	}
-	switch CurrentVersion {
-	case Version8:
-		if err := w.mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:    webrtc.MimeTypeVP8,
-				ClockRate:   90000,
-				Channels:    0,
-				SDPFmtpLine: "",
-				// SDPFmtpLine:  "profile-level-id=42e01f;packetization-mode=1",
-				RTCPFeedback: nil,
-			},
-			PayloadType: 96,
-			// PayloadType: 102,
-		}, webrtc.RTPCodecTypeVideo); err != nil {
-			panic(err)
-		}
-	case Version9:
-		if err := w.mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:    webrtc.MimeTypeVP9,
-				ClockRate:   90000,
-				Channels:    0,
-				SDPFmtpLine: "",
-				// SDPFmtpLine:  "profile-id=0; ",
-				RTCPFeedback: nil,
-			},
-			PayloadType: 98,
-		}, webrtc.RTPCodecTypeVideo); err != nil {
-			panic(err)
-		}
-	}
-
-	i := &interceptor.Registry{}
-
-	// Use the default set of Interceptors
-	// if err := webrtc.RegisterDefaultInterceptors(&w.mediaEngine, i); err != nil {
-	// 	panic(err)
-	// }
-
-	intervalPliFactory, err := intervalpli.NewReceiverInterceptor(
-		intervalpli.GeneratorInterval(time.Second * 2),
-	)
-	if err != nil {
+	if err := w.mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeVP8,
+			ClockRate:   90000,
+			Channels:    0,
+			SDPFmtpLine: "",
+			// SDPFmtpLine:  "profile-level-id=42e01f;packetization-mode=1",
+			RTCPFeedback: nil,
+		},
+		PayloadType: 96,
+		// PayloadType: 102,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
 		panic(err)
 	}
-	i.Add(intervalPliFactory)
-	// Create API with MediaEngine
-	w.api = webrtc.NewAPI(webrtc.WithMediaEngine(&w.mediaEngine), webrtc.WithInterceptorRegistry(i))
+
 	return w
 }
 
