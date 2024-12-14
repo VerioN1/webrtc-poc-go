@@ -4,21 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
-	"sync/atomic"
 	"time"
 
+	"webrtc_poc_go/pkg/webrtc_media"
+	wsPkg "webrtc_poc_go/pkg/ws"
+
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
 )
-
-type WebSocketMessage struct {
-	Type      string                   `json:"type"`
-	SDP       string                   `json:"sdp,omitempty"`
-	Candidate *webrtc.ICECandidateInit `json:"candidate,omitempty"`
-	Payload   map[string]interface{}   `json:"payload,omitempty"`
-	Message   string                   `json:"message,omitempty"`
-}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -27,13 +22,11 @@ var upgrader = websocket.Upgrader{
 }
 
 var (
-	totalPacketsProcessed uint64
-	totalPacketErrors     uint64
-	lastPacketTimestamp   atomic.Value
+	peersManagers = webrtc_media.NewPeersManager()
 )
 
 func websocketServer(w http.ResponseWriter, r *http.Request) {
-	lastPacketTimestamp.Store(time.Now())
+	connectionID := uuid.NewString()
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -43,195 +36,88 @@ func websocketServer(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("WebSocket upgrade error:", err)
 		return
 	}
-	defer ws.Close()
 
-	peerConnection, err := createPeerConnection()
-	if err != nil {
-		fmt.Println("Failed to create peer connection:", err)
-		return
-	}
-	defer peerConnection.Close()
+	safeWS := wsPkg.NewSafeWebSocket(ws)
+	fmt.Println("New WebSocket connection:", connectionID)
 
-	var (
-		outputTrackMutex sync.RWMutex
-		outputTrack      *webrtc.TrackLocalStaticRTP
-		rtpSender        *webrtc.RTPSender
-	)
-	go func() {
-		rtcpBuf := make([]byte, 900)
-		for {
-			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+	safeWS.OnMessage(ctx, func(message wsPkg.WebSocketMessage) {
+		switch message.Type {
+		case "offer":
+			p := webrtc_media.NewWebRTCPeer(connectionID)
+			peersManagers.AddPeer(connectionID, p)
+
+			offer := webrtc.SessionDescription{
+				Type: webrtc.SDPTypeOffer,
+				SDP:  message.SDP,
+			}
+
+			// Since we have no publish/subscribe logic here, we assume sender scenario
+			answer, err := p.AnswerSender(offer)
+			if err != nil {
 				return
 			}
-		}
-	}()
-	createOrReplaceOutputTrack := func(codec webrtc.RTPCodecCapability) error {
-		outputTrackMutex.Lock()
-		defer outputTrackMutex.Unlock()
-
-		if outputTrack != nil {
-			if err := peerConnection.RemoveTrack(rtpSender); err != nil {
-				return fmt.Errorf("failed to remove existing track: %v", err)
+			resp := wsPkg.WebSocketMessage{
+				Type: "answer",
+				SDP:  answer.SDP,
 			}
-		}
+			safeWS.Send(resp)
 
-		newTrack, err := webrtc.NewTrackLocalStaticRTP(codec, "video", "pion")
-		if err != nil {
-			return fmt.Errorf("failed to create output track: %v", err)
-		}
-
-		rtpSender, err = peerConnection.AddTrack(newTrack)
-		if err != nil {
-			return fmt.Errorf("failed to add local track: %v", err)
-		}
-
-		outputTrack = newTrack
-		return nil
-	}
-
-	// Initialize with codec
-	if err := createOrReplaceOutputTrack(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9}); err != nil {
-		fmt.Println("Initial track creation failed:", err)
-		return
-	}
-
-	// Connection state handlers with improved logging
-	peerConnection.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		fmt.Printf("Peer Connection State: %s\n", s)
-		if s == webrtc.PeerConnectionStateFailed ||
-			s == webrtc.PeerConnectionStateClosed ||
-			s == webrtc.PeerConnectionStateDisconnected {
-			cancel()
-		}
-	})
-
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("ICE Connection State: %s\n", connectionState)
-		if connectionState == webrtc.ICEConnectionStateFailed ||
-			connectionState == webrtc.ICEConnectionStateClosed ||
-			connectionState == webrtc.ICEConnectionStateDisconnected {
-			fmt.Println("ICE connection state is failed/closed/disconnected")
-			if err := peerConnection.Close(); err != nil {
-				cancel()
-				fmt.Println("Failed to close peer connection:", err)
-			}
-		}
-	})
-
-	// Track handling with context and controlled buffer
-	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) { //nolint: revive
-		fmt.Printf("Track has started, of type %d: %s \n", track.PayloadType(), track.Codec().MimeType)
-		for {
-			// Read RTP packets being sent to Pion
-			rtp, _, readErr := track.ReadRTP()
-			if readErr != nil {
-				fmt.Printf("read Error:", readErr)
-			}
-
-			if writeErr := outputTrack.WriteRTP(rtp); writeErr != nil {
-				fmt.Printf("Write Error", writeErr)
-			}
-		}
-	})
-
-	// ICE candidate handling remains similar
-	peerConnection.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c == nil {
-			return
-		}
-		candidate := c.ToJSON()
-		message := WebSocketMessage{
-			Type:      "candidate",
-			Candidate: &candidate,
-		}
-		if err := ws.WriteJSON(message); err != nil {
-			fmt.Println("WebSocket write error:", err)
-		}
-	})
-
-	var candidateQueue []webrtc.ICECandidateInit
-	remoteDescriptionSet := false
-	// WebSocket message processing loop
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			var message WebSocketMessage
-			if err := ws.ReadJSON(&message); err != nil {
-				fmt.Println("WebSocket read error:", err)
-				return
-			}
-
-			// Existing message processing logic remains the same
-			switch message.Type {
-			case "offer":
-				sdp := webrtc.SessionDescription{
-					Type: webrtc.SDPTypeOffer,
-					SDP:  message.SDP,
+			p.PC.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
+				fmt.Printf("Peer Connection State: %s\n", s)
+				if s == webrtc.PeerConnectionStateFailed ||
+					s == webrtc.PeerConnectionStateClosed ||
+					s == webrtc.PeerConnectionStateDisconnected {
+					// cancel()
+					fmt.Println("Peer connection state is failed/closed/disconnected")
 				}
-				if err := peerConnection.SetRemoteDescription(sdp); err != nil {
-					fmt.Println("SetRemoteDescription error:", err)
-					continue
-				}
-				remoteDescriptionSet = true
+			})
 
-				// Create answer
-				answer, err := peerConnection.CreateAnswer(nil)
-				if err != nil {
-					fmt.Println("CreateAnswer error:", err)
-					continue
+			p.PC.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+				fmt.Printf("ICE Connection State: %s\n", connectionState)
+				if connectionState == webrtc.ICEConnectionStateFailed ||
+					connectionState == webrtc.ICEConnectionStateClosed ||
+					connectionState == webrtc.ICEConnectionStateDisconnected {
+					fmt.Println("ICE connection state is failed/closed/disconnected")
+					if err := p.PC.Close(); err != nil {
+						// cancel()
+						fmt.Println("Failed to close peer connection:", err)
+					}
 				}
-
-				// Set local description with modified SDP
-				if err := peerConnection.SetLocalDescription(answer); err != nil {
-					fmt.Println("SetLocalDescription error:", err)
-					continue
+			})
+			// // ICE candidate handling remains similar
+			fmt.Println("Answering with SDP:", answer.SDP)
+			p.PC.OnICECandidate(func(c *webrtc.ICECandidate) {
+				if c == nil {
+					return
 				}
-
-				// Send the answer back to the client immediately
-				response := WebSocketMessage{
-					Type: "answer",
-					SDP:  peerConnection.LocalDescription().SDP,
+				candidate := c.ToJSON()
+				message := wsPkg.WebSocketMessage{
+					Type:      "candidate",
+					Candidate: &candidate,
 				}
-				if err := ws.WriteJSON(response); err != nil {
+				if err := ws.WriteJSON(message); err != nil {
 					fmt.Println("WebSocket write error:", err)
-					continue
 				}
-
-				// Add any queued ICE candidates now that remote description is set.
-				for _, c := range candidateQueue {
-					if err := peerConnection.AddICECandidate(c); err != nil {
-						fmt.Println("AddICECandidate error:", err)
-					}
+			})
+		case "candidate":
+			p := peersManagers.GetPeer(connectionID)
+			if p != nil && message.Candidate != nil {
+				err := p.PC.AddICECandidate(*message.Candidate)
+				if err != nil {
+					fmt.Printf("AddICECandidate error: %v", err)
 				}
-				candidateQueue = nil
-
-			case "candidate":
-				if message.Candidate != nil {
-					if remoteDescriptionSet {
-						if err := peerConnection.AddICECandidate(*message.Candidate); err != nil {
-							fmt.Println("AddICECandidate error:", err)
-						}
-					} else {
-						candidateQueue = append(candidateQueue, *message.Candidate)
-					}
-				}
-
-			case "re-negotiate":
-				// Handle re-negotiation if needed.
-
-			case "message":
-				// Handle custom messages.
-
-			case "gameConfig":
-				// Handle game configuration messages.
-
-			default:
-				fmt.Println("Unknown message type:", message.Type)
 			}
+
+		default:
+			fmt.Println("Unknown message type:", message.Type)
 		}
-	}
+	}, func() {
+		peersManagers.RemovePeer(connectionID)
+		cancel()
+	})
+
+	<-ctx.Done()
+
 }
 
 func createPeerConnection() (*webrtc.PeerConnection, error) {
@@ -241,7 +127,7 @@ func createPeerConnection() (*webrtc.PeerConnection, error) {
 	// Register Codec
 	codecForVideo := webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
+			MimeType:    webrtc.MimeTypeH264,
 			ClockRate:   90000,
 			Channels:    0,
 			SDPFmtpLine: "profile-id=0; ",
@@ -251,9 +137,12 @@ func createPeerConnection() (*webrtc.PeerConnection, error) {
 	if err := m.RegisterCodec(codecForVideo, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, err
 	}
-
+	i := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
+		panic(err)
+	}
 	// Create API with MediaEngine
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i))
 
 	// Create PeerConnection
 	peerConnection, err := api.NewPeerConnection(webrtc.Configuration{

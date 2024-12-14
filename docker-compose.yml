@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    restart: always
+    ports:
+      - "9912:9912"
+    volumes:
+      - .:/app
+    environment:
+      - AIR_CONFIG=.air.toml
