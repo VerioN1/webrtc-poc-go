@@ -3,7 +3,7 @@ package webrtc_media
 import (
 	"fmt"
 	"sync"
-	"time"
+	grpc_service "webrtc_poc_go/pkg/grpc_server"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -45,41 +45,19 @@ func NewWebRTCPeer(id string) *WebRTCPeer {
 }
 
 func (p *WebRTCPeer) Stop() {
-	if p != nil && p.PC != nil {
+	if p == nil {
+		return
+	}
+	if p.PC != nil {
 		p.PC.Close()
 	}
 	close(p.stop)
 	close(p.pli)
 }
 
-func (p *WebRTCPeer) AnswerSender(offer webrtc.SessionDescription) (answer webrtc.SessionDescription, err error) {
+func (p *WebRTCPeer) AnswerSender(offer webrtc.SessionDescription, grpcConnection *grpc_service.GrpcServerManager) (answer webrtc.SessionDescription, err error) {
 	fmt.Println("WebRTCPeer.AnswerSender")
-	return webrtcEngine.CreateSenderReciverClient(offer, &p.PC, &p.VideoTrack, p.stop)
-}
-
-func (p *WebRTCPeer) SendPLI() {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Printf("%v", r)
-				return
-			}
-		}()
-		ticker := time.NewTicker(time.Second)
-		i := 0
-		for {
-			select {
-			case <-ticker.C:
-				p.pli <- 1
-				if i > 3 {
-					return
-				}
-				i++
-			case <-p.stop:
-				return
-			}
-		}
-	}()
+	return webrtcEngine.CreateSenderReciverClient(offer, &p.PC, &p.VideoTrack, p.stop, grpcConnection)
 }
 
 func (pm *PeersManager) AddPeer(id string, p *WebRTCPeer) {

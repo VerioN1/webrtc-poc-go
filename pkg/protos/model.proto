@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package model;  
+
+option go_package = "pkg/protos";  
+
+
+service ImageService {
+  rpc StreamImage (stream StreamImageRequest) returns (stream ImageResponse);
+}
+
+message Image {
+  bytes image_data = 1;
+}
+
+message ImageResponse {
+  Image image = 1;
+}
+
+message StreamImageRequest {
+  Image image = 1;
+  bool is_key_frame = 2;
+} 
