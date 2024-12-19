@@ -168,7 +168,7 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop ch
 		}
 		go DecodeVP9AndWriteYUV(sampleChan, grpcConnection)
 		InitEncoderFrameSender(videoTrack, grpcConnection.ReceiverChan)
-		builder := samplebuilder.New(35, pkt, t.Codec().ClockRate)
+		builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)
 		for {
 			select {
 			case <-stop:
