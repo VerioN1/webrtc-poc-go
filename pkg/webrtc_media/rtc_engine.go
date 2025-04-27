@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	grpc_service "webrtc_poc_go/pkg/grpc_server"
@@ -48,6 +52,7 @@ type WebRTCEngine struct {
 	cfg         webrtc.Configuration
 	mediaEngine webrtc.MediaEngine
 	api         *webrtc.API
+	watermark   image.Image
 }
 
 func NewWebRTCEngine() *WebRTCEngine {
@@ -55,6 +60,13 @@ func NewWebRTCEngine() *WebRTCEngine {
 		mediaEngine: webrtc.MediaEngine{},
 		cfg:         defaultPeerCfg,
 	}
+
+	// Load watermark
+	err := w.LoadWatermark("watermark.png")
+	if err != nil {
+		log.Printf("Warning: Failed to load watermark: %v", err)
+	}
+
 	if err := w.mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeVP8,
@@ -91,16 +103,27 @@ func NewWebRTCEngine() *WebRTCEngine {
 	return w
 }
 
-// Both sides will send and receive. We add transceivers and set OnTrack.
-// If local tracks are provided, we add them so this side can send as well.
-func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription, pc **webrtc.PeerConnection, addVideoTrack **webrtc.TrackLocalStaticSample, stop chan int, grpcConnection *grpc_service.GrpcServerManager) (answer webrtc.SessionDescription, err error) {
-	*pc, err = s.api.NewPeerConnection(s.cfg)
+// Main function that checks gRPC connection and routes accordingly
+func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription, pc **webrtc.PeerConnection, addVideoTrack **webrtc.TrackLocalStaticSample, stop chan int, connectionID string) (answer webrtc.SessionDescription, err error) {
 	fmt.Printf("WebRTCEngine.CreateSenderReceiverClient pc=%p\n", *pc)
+
+	// Check if gRPC connection exists
+	grpcConnection := grpc_service.GetConnectionManager().GetConnection(connectionID)
+	if grpcConnection != nil {
+		return s.createSenderWithGRPC(offer, pc, addVideoTrack, stop, connectionID, grpcConnection)
+	} else {
+		return s.createSimpleEchoSender(offer, pc, addVideoTrack, stop)
+	}
+}
+
+// Handler with gRPC processing
+func (s *WebRTCEngine) createSenderWithGRPC(offer webrtc.SessionDescription, pc **webrtc.PeerConnection, addVideoTrack **webrtc.TrackLocalStaticSample, stop chan int, connectionID string, grpcConnection *grpc_service.GrpcServerManager) (answer webrtc.SessionDescription, err error) {
+	*pc, err = s.api.NewPeerConnection(s.cfg)
 	if err != nil {
 		return webrtc.SessionDescription{}, err
 	}
 
-	// Add transceivers for video and audio in sendrecv mode
+	// Add transceivers for video in sendrecv mode
 	videoTransceiver, err := (*pc).AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
 		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv},
@@ -109,13 +132,15 @@ func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription
 		return webrtc.SessionDescription{}, err
 	}
 
-	// Handle incoming tracks and send them back
+	// Handle incoming tracks and send them to gRPC
 	(*pc).OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		fmt.Printf("OnTrack received track: %s, codec: %s\n", t.ID(), t.Codec().MimeType)
-		// Determine if it's video or audio
+
+		// Handle only video tracks
 		if t.Kind() == webrtc.RTPCodecTypeAudio {
 			return
 		}
+
 		// Create a local video track to send back data
 		fmt.Println("Create local video track")
 		localVideoTrack, err := webrtc.NewTrackLocalStaticSample(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
@@ -130,8 +155,8 @@ func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription
 			return
 		}
 
-		// Now handle incoming track and write samples to localVideoTrack
-		s.handleIncomingTrackWithPLI(t, stop, localVideoTrack, nil, grpcConnection)
+		// Now handle incoming track with gRPC processing
+		s.handleIncomingTrackWithGRPC(t, stop, localVideoTrack, nil, connectionID)
 	})
 
 	// Set remote description, create and set local answer
@@ -147,12 +172,109 @@ func (s *WebRTCEngine) CreateSenderReciverClient(offer webrtc.SessionDescription
 		return webrtc.SessionDescription{}, err
 	}
 
-	fmt.Println("WebRTCEngine.CreateSenderReceiverClient done")
+	fmt.Println("CreateSenderWithGRPC done")
 	return answer, err
 }
 
-// This version handles PLI channel and can forward incoming tracks to local tracks if provided
-func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop chan int, videoTrack *webrtc.TrackLocalStaticSample, audioTrack *webrtc.TrackLocalStaticRTP, grpcConnection *grpc_service.GrpcServerManager) {
+// Simple echo handler without gRPC
+func (s *WebRTCEngine) createSimpleEchoSender(offer webrtc.SessionDescription, pc **webrtc.PeerConnection, addVideoTrack **webrtc.TrackLocalStaticSample, stop chan int) (answer webrtc.SessionDescription, err error) {
+	*pc, err = s.api.NewPeerConnection(s.cfg)
+	if err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+
+	// Add transceivers for video in sendrecv mode
+	videoTransceiver, err := (*pc).AddTransceiverFromKind(
+		webrtc.RTPCodecTypeVideo,
+		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv},
+	)
+	if err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+
+	// Handle incoming tracks with simple echo back
+	(*pc).OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		fmt.Printf("OnTrack received track (echo mode): %s, codec: %s\n", t.ID(), t.Codec().MimeType)
+
+		// Handle only video tracks
+		if t.Kind() == webrtc.RTPCodecTypeAudio {
+			return
+		}
+
+		// Create a local video track to send back data
+		fmt.Println("Create local video track (echo mode)")
+		localVideoTrack, err := webrtc.NewTrackLocalStaticSample(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
+		if err != nil {
+			fmt.Println("Failed to create local video track:", err)
+			return
+		}
+
+		// Replace the track on the video sender with our new local video track
+		if err := videoTransceiver.Sender().ReplaceTrack(localVideoTrack); err != nil {
+			fmt.Println("Failed to replace video track:", err)
+			return
+		}
+
+		// Simple echo handler - read RTP packets and write them back
+		s.handleSimpleEchoTrack(t, stop, localVideoTrack)
+	})
+
+	// Set remote description, create and set local answer
+	if err = (*pc).SetRemoteDescription(offer); err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+
+	answer, err = (*pc).CreateAnswer(nil)
+	if err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+	if err = (*pc).SetLocalDescription(answer); err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+
+	fmt.Println("CreateSimpleEchoSender done")
+	return answer, err
+}
+
+// Add a new handler for simple echo-back without gRPC
+func (s *WebRTCEngine) handleSimpleEchoTrack(t *webrtc.TrackRemote, stop chan int, videoTrack *webrtc.TrackLocalStaticSample) {
+	// For simple echo, we'll just build samples and write them back
+	var pkt rtp.Depacketizer
+	switch t.Codec().MimeType {
+	case webrtc.MimeTypeVP8:
+		pkt = &codecs.VP8Packet{}
+	case webrtc.MimeTypeVP9:
+		pkt = &codecs.VP9Packet{}
+	case webrtc.MimeTypeH264:
+		pkt = &codecs.H264Packet{}
+	}
+
+	builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)
+
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				rtpPacket, _, err := t.ReadRTP()
+				if err != nil {
+					fmt.Println("ReadRTP error:", err.Error())
+					return
+				}
+				builder.Push(rtpPacket)
+				for sample := builder.Pop(); sample != nil; sample = builder.Pop() {
+					if err := videoTrack.WriteSample(*sample); err != nil && err != io.ErrClosedPipe {
+						fmt.Println("WriteSample error:", err.Error())
+					}
+				}
+			}
+		}
+	}()
+}
+
+// Rename the original handler to be clear it's using gRPC
+func (s *WebRTCEngine) handleIncomingTrackWithGRPC(t *webrtc.TrackRemote, stop chan int, videoTrack *webrtc.TrackLocalStaticSample, audioTrack *webrtc.TrackLocalStaticRTP, connectionID string) {
 	if t.Codec().MimeType == webrtc.MimeTypeVP8 ||
 		t.Codec().MimeType == webrtc.MimeTypeVP9 ||
 		t.Codec().MimeType == webrtc.MimeTypeH264 {
@@ -166,8 +288,13 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop ch
 		case webrtc.MimeTypeH264:
 			pkt = &codecs.H264Packet{}
 		}
-		go DecodeVP9AndWriteYUV(sampleChan, grpcConnection)
-		InitEncoderFrameSender(videoTrack, grpcConnection.ReceiverChan)
+
+		// Get gRPC connection
+		grpcConnection := grpc_service.GetConnectionManager().GetConnection(connectionID)
+
+		go DecodeVP9AndWriteYUV(sampleChan, connectionID)
+		InitEncoderFrameSender(videoTrack, grpcConnection.ReceiverChan, s.watermark)
+
 		builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)
 		for {
 			select {
@@ -183,16 +310,9 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop ch
 				builder.Push(rtpPacket)
 				for sample := builder.Pop(); sample != nil; sample = builder.Pop() {
 					sampleChan <- sample
-					// Write the decoded sample back to our local video track
-					// if videoTrack != nil {
-					// 	if err := videoTrack.WriteSample(*sample); err != nil && err != io.ErrClosedPipe {
-					// 		fmt.Println("WriteSample error:", err.Error())
-					// 	}
-					// }
 				}
 			}
 		}
-
 	}
 }
 
@@ -313,38 +433,12 @@ func isH264KeyFrame(sampleData []byte) bool {
 // 	}()
 // }
 
-func InitEncoderFrameSender(videoTrackSampleWriter SampleWriter, receiverChan chan []byte) {
-	// readerAdapter := NewGrpcVideoReaderAdapter(receiverChan, 480, 640)
-	// ctx := context.Background()
-	// encoder, err := NewEncoder(Version9, 480, 640, 1)
-	// if err != nil {
-	// 	log.Println("Failed to create encoder:", err)
-	// 	return
-	// }
+func InitEncoderFrameSender(videoTrackSampleWriter SampleWriter, receiverChan chan []byte, watermarkImg image.Image) {
 	log.Println("Start reading track")
 	firstFrame := true
 	var lastFrameTime time.Time
 	go func() {
 		for frameData := range receiverChan {
-			// startRead := time.Now()
-			// img, err := jpeg.Decode(bytes.NewReader(frameData))
-			// if err != nil {
-			// 	// If decoding fails, log the error and return EOF or handle it as you wish
-			// 	log.Printf("Failed to decode JPEG: %v", err)
-			// 	continue
-			// }
-			// yuvFrame, err := imageToYUV(img)
-			// if err != nil {
-			// 	log.Println("Failed to convert image to YUV:", err)
-			// 	continue
-			// }
-			// // log.Println(img.At(2, 4))
-			// log.Println("encoder.Read took %v", time.Since(startRead))
-			// encodedFrame, err := encoder.Encode(ctx, yuvFrame)
-			// if err != nil {
-			// 	log.Println("Failed to encode frame:", err)
-			// 	continue
-			// }
 			currentTime := time.Now()
 			var frameDuration time.Duration
 			if firstFrame {
@@ -354,6 +448,30 @@ func InitEncoderFrameSender(videoTrackSampleWriter SampleWriter, receiverChan ch
 				frameDuration = currentTime.Sub(lastFrameTime)
 			}
 			lastFrameTime = currentTime
+
+			// Apply watermark if available
+			if watermarkImg != nil {
+				// Decode the image (assuming it's JPEG or other format)
+				img, _, err := image.Decode(bytes.NewReader(frameData))
+				if err == nil {
+					// Create new RGBA image with watermark
+					bounds := img.Bounds()
+					rgba := image.NewRGBA(bounds)
+					draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+
+					// Position watermark at bottom right
+					wmBounds := watermarkImg.Bounds()
+					offset := image.Pt(bounds.Max.X-wmBounds.Dx()-10, bounds.Max.Y-wmBounds.Dy()-10)
+					draw.Draw(rgba, wmBounds.Add(offset), watermarkImg, wmBounds.Min, draw.Over)
+
+					// Encode back to bytes
+					var buf bytes.Buffer
+					if err := jpeg.Encode(&buf, rgba, nil); err == nil {
+						frameData = buf.Bytes()
+					}
+				}
+			}
+
 			fmt.Println("Received frame, sending to WriteSampler", frameDuration, len(frameData))
 			sample := media.Sample{
 				Data:     frameData,
@@ -363,7 +481,6 @@ func InitEncoderFrameSender(videoTrackSampleWriter SampleWriter, receiverChan ch
 			if err := videoTrackSampleWriter.WriteSample(sample); err != nil && err != io.ErrClosedPipe {
 				log.Println("WriteSample error:", err)
 			}
-
 		}
 	}()
 }
@@ -392,4 +509,20 @@ func imageToYUV(img image.Image) (*image.YCbCr, error) {
 		}
 	}
 	return yuvImg, nil
+}
+
+func (w *WebRTCEngine) LoadWatermark(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open watermark: %v", err)
+	}
+	defer file.Close()
+
+	watermark, err := png.Decode(file)
+	if err != nil {
+		return fmt.Errorf("failed to decode watermark: %v", err)
+	}
+
+	w.watermark = watermark
+	return nil
 }

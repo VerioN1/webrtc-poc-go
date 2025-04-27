@@ -5,13 +5,18 @@ import (
 
 	grpc_service "webrtc_poc_go/pkg/grpc_server"
 
+	"image"
+	"image/draw"
+
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/xlab/libvpx-go/vpx"
 )
 
-func DecodeVP9AndWriteYUV(sampleChan <-chan *media.Sample, grpcInstnc *grpc_service.GrpcServerManager) {
+func DecodeVP9AndWriteYUV(sampleChan <-chan *media.Sample, peerID string) {
 	ctx := vpx.NewCodecCtx()
 	iface := vpx.DecoderIfaceVP8()
+	grpcInstnc := grpc_service.GetConnectionManager().GetConnection(peerID)
+
 	// i := 0
 	err := vpx.Error(vpx.CodecDecInitVer(ctx, iface, nil, 0, vpx.DecoderABIVersion))
 	if err != nil {
@@ -25,7 +30,9 @@ func DecodeVP9AndWriteYUV(sampleChan <-chan *media.Sample, grpcInstnc *grpc_serv
 	go func() {
 		for frameData := range frameChan {
 			// Move StreamImage call here so decoding isn't blocked by Send()
-			grpcInstnc.StreamImage(frameData, true)
+			if grpcInstnc != nil {
+				grpcInstnc.StreamImage(frameData, true)
+			}
 		}
 	}()
 
@@ -52,4 +59,28 @@ func DecodeVP9AndWriteYUV(sampleChan <-chan *media.Sample, grpcInstnc *grpc_serv
 		}
 	}
 	close(frameChan)
+}
+
+// AddWatermark overlays a watermark on an image
+func (w *WebRTCEngine) AddWatermark(img image.Image) image.Image {
+	if w.watermark == nil {
+		return img // No watermark available
+	}
+
+	bounds := img.Bounds()
+	rgba := image.NewRGBA(bounds)
+
+	// Draw the original image
+	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+
+	// Calculate position for the watermark (bottom right corner)
+	wmBounds := w.watermark.Bounds()
+	x := bounds.Max.X - wmBounds.Dx() - 10 // 10px padding
+	y := bounds.Max.Y - wmBounds.Dy() - 10 // 10px padding
+	offset := image.Pt(x, y)
+
+	// Draw the watermark
+	draw.Draw(rgba, wmBounds.Add(offset), w.watermark, wmBounds.Min, draw.Over)
+
+	return rgba
 }

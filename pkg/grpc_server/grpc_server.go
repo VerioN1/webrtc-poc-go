@@ -1,4 +1,4 @@
-package grpc_server
+package grpc_service
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	pb "webrtc_poc_go/pkg/protos"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -90,7 +91,15 @@ func InitRpcConnection(wsContext context.Context) *GrpcServerManager {
 	ctx, cancel := context.WithCancel(wsContext)
 	// Remove defer cancel() here
 
-	conn, err := grpc.NewClient("172.27.57.33:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("172.27.57.33:50052", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithConnectParams(grpc.ConnectParams{
+		Backoff: backoff.Config{
+			BaseDelay:  100 * time.Millisecond,
+			Multiplier: 1.6,
+			Jitter:     0.2,
+			MaxDelay:   3 * time.Second,
+		},
+		MinConnectTimeout: 3 * time.Second,
+	}))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
@@ -101,7 +110,10 @@ func InitRpcConnection(wsContext context.Context) *GrpcServerManager {
 	// Call the streaming API
 	stream, err := client.StreamImage(ctx)
 	if err != nil {
-		log.Fatalf("StreamImage error: %v", err)
+		// log.Fatalf("StreamImage error: %v", err)
+		// conn.Close()
+		// cancel()
+		return nil
 	}
 
 	go func() {

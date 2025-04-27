@@ -3,7 +3,6 @@ package webrtc_media
 import (
 	"fmt"
 	"sync"
-	grpc_service "webrtc_poc_go/pkg/grpc_server"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -55,9 +54,10 @@ func (p *WebRTCPeer) Stop() {
 	close(p.pli)
 }
 
-func (p *WebRTCPeer) AnswerSender(offer webrtc.SessionDescription, grpcConnection *grpc_service.GrpcServerManager) (answer webrtc.SessionDescription, err error) {
+func (p *WebRTCPeer) AnswerSender(offer webrtc.SessionDescription, peerId string) (answer webrtc.SessionDescription, err error) {
 	fmt.Println("WebRTCPeer.AnswerSender")
-	return webrtcEngine.CreateSenderReciverClient(offer, &p.PC, &p.VideoTrack, p.stop, grpcConnection)
+	// Get the connection from the manager
+	return webrtcEngine.CreateSenderReciverClient(offer, &p.PC, &p.VideoTrack, p.stop, peerId)
 }
 
 func (pm *PeersManager) AddPeer(id string, p *WebRTCPeer) {

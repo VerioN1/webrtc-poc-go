@@ -40,7 +40,9 @@ func websocketServer(w http.ResponseWriter, r *http.Request) {
 
 	safeWS := wsPkg.NewSafeWebSocket(ws)
 	fmt.Println("New WebSocket connection:", connectionID)
-	grpcConnection := grpcService.InitRpcConnection(ctx)
+
+	// Initialize the gRPC connection via the manager
+	grpcService.GetConnectionManager().InitConnection(ctx, connectionID)
 
 	safeWS.OnMessage(ctx, func(message wsPkg.WebSocketMessage) {
 		switch message.Type {
@@ -54,7 +56,7 @@ func websocketServer(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Since we have no publish/subscribe logic here, we assume sender scenario
-			answer, err := p.AnswerSender(offer, grpcConnection)
+			answer, err := p.AnswerSender(offer, connectionID)
 			if err != nil {
 				return
 			}
@@ -115,7 +117,7 @@ func websocketServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}, func() {
 		peersManagers.RemovePeer(connectionID)
-		grpcConnection.Close()
+		grpcService.GetConnectionManager().CloseConnection(connectionID)
 		cancel()
 	})
 
