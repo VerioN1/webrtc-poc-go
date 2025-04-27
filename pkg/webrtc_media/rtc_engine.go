@@ -176,103 +176,6 @@ func (s *WebRTCEngine) createSenderWithGRPC(offer webrtc.SessionDescription, pc 
 	return answer, err
 }
 
-// Simple echo handler without gRPC
-func (s *WebRTCEngine) createSimpleEchoSender(offer webrtc.SessionDescription, pc **webrtc.PeerConnection, addVideoTrack **webrtc.TrackLocalStaticSample, stop chan int) (answer webrtc.SessionDescription, err error) {
-	*pc, err = s.api.NewPeerConnection(s.cfg)
-	if err != nil {
-		return webrtc.SessionDescription{}, err
-	}
-
-	// Add transceivers for video in sendrecv mode
-	videoTransceiver, err := (*pc).AddTransceiverFromKind(
-		webrtc.RTPCodecTypeVideo,
-		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv},
-	)
-	if err != nil {
-		return webrtc.SessionDescription{}, err
-	}
-
-	// Handle incoming tracks with simple echo back
-	(*pc).OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		fmt.Printf("OnTrack received track (echo mode): %s, codec: %s\n", t.ID(), t.Codec().MimeType)
-
-		// Handle only video tracks
-		if t.Kind() == webrtc.RTPCodecTypeAudio {
-			return
-		}
-
-		// Create a local video track to send back data
-		fmt.Println("Create local video track (echo mode)")
-		localVideoTrack, err := webrtc.NewTrackLocalStaticSample(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
-		if err != nil {
-			fmt.Println("Failed to create local video track:", err)
-			return
-		}
-
-		// Replace the track on the video sender with our new local video track
-		if err := videoTransceiver.Sender().ReplaceTrack(localVideoTrack); err != nil {
-			fmt.Println("Failed to replace video track:", err)
-			return
-		}
-
-		// Simple echo handler - read RTP packets and write them back
-		s.handleSimpleEchoTrack(t, stop, localVideoTrack)
-	})
-
-	// Set remote description, create and set local answer
-	if err = (*pc).SetRemoteDescription(offer); err != nil {
-		return webrtc.SessionDescription{}, err
-	}
-
-	answer, err = (*pc).CreateAnswer(nil)
-	if err != nil {
-		return webrtc.SessionDescription{}, err
-	}
-	if err = (*pc).SetLocalDescription(answer); err != nil {
-		return webrtc.SessionDescription{}, err
-	}
-
-	fmt.Println("CreateSimpleEchoSender done")
-	return answer, err
-}
-
-// Add a new handler for simple echo-back without gRPC
-func (s *WebRTCEngine) handleSimpleEchoTrack(t *webrtc.TrackRemote, stop chan int, videoTrack *webrtc.TrackLocalStaticSample) {
-	// For simple echo, we'll just build samples and write them back
-	var pkt rtp.Depacketizer
-	switch t.Codec().MimeType {
-	case webrtc.MimeTypeVP8:
-		pkt = &codecs.VP8Packet{}
-	case webrtc.MimeTypeVP9:
-		pkt = &codecs.VP9Packet{}
-	case webrtc.MimeTypeH264:
-		pkt = &codecs.H264Packet{}
-	}
-
-	builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)
-
-	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-				rtpPacket, _, err := t.ReadRTP()
-				if err != nil {
-					fmt.Println("ReadRTP error:", err.Error())
-					return
-				}
-				builder.Push(rtpPacket)
-				for sample := builder.Pop(); sample != nil; sample = builder.Pop() {
-					if err := videoTrack.WriteSample(*sample); err != nil && err != io.ErrClosedPipe {
-						fmt.Println("WriteSample error:", err.Error())
-					}
-				}
-			}
-		}
-	}()
-}
-
 // Rename the original handler to be clear it's using gRPC
 func (s *WebRTCEngine) handleIncomingTrackWithGRPC(t *webrtc.TrackRemote, stop chan int, videoTrack *webrtc.TrackLocalStaticSample, audioTrack *webrtc.TrackLocalStaticRTP, connectionID string) {
 	if t.Codec().MimeType == webrtc.MimeTypeVP8 ||
@@ -292,7 +195,7 @@ func (s *WebRTCEngine) handleIncomingTrackWithGRPC(t *webrtc.TrackRemote, stop c
 		// Get gRPC connection
 		grpcConnection := grpc_service.GetConnectionManager().GetConnection(connectionID)
 
-		go DecodeVP9AndWriteYUV(sampleChan, connectionID)
+		DecodeVPAndWriteYUV(sampleChan, connectionID)
 		InitEncoderFrameSender(videoTrack, grpcConnection.ReceiverChan, s.watermark)
 
 		builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)

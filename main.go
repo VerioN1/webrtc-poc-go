@@ -132,7 +132,7 @@ func createPeerConnection() (*webrtc.PeerConnection, error) {
 	// Register Codec
 	codecForVideo := webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeH264,
+			MimeType:    webrtc.MimeTypeVP8,
 			ClockRate:   90000,
 			Channels:    0,
 			SDPFmtpLine: "profile-id=0; ",

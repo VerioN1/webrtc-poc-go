@@ -12,7 +12,7 @@ import (
 	"github.com/xlab/libvpx-go/vpx"
 )
 
-func DecodeVP9AndWriteYUV(sampleChan <-chan *media.Sample, peerID string) {
+func DecodeVPAndWriteYUV(sampleChan <-chan *media.Sample, peerID string) {
 	ctx := vpx.NewCodecCtx()
 	iface := vpx.DecoderIfaceVP8()
 	grpcInstnc := grpc_service.GetConnectionManager().GetConnection(peerID)
