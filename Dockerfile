@@ -2,7 +2,7 @@
 FROM golang:1.23.4-bullseye
 
 RUN apt-get update 
-RUN apt-get install -y libvpx-dev libogg-dev libx264-dev libvorbis-dev libva-dev ffmpeg
+RUN apt-get install -y libvpx-dev libogg-dev libx264-dev libvorbis-dev libva-dev ffmpeg libavcodec-dev libswscale-dev gcc pkg-config
 
 # Install Air for hot reloading from the new repository
 RUN go install github.com/air-verse/air@latest

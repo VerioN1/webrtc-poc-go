@@ -37,6 +37,11 @@
     <div id="controls">
         <button id="cameraBtn">Use Camera</button>
         <button id="screenBtn">Share Screen</button>
+        <div style="margin-left: 20px;">
+            <label for="audioControl">
+                <input type="checkbox" id="audioControl" checked> Enable Audio
+            </label>
+        </div>
     </div>
 
     <div id="videos" style="display: flex; justify-content: center; flex-direction: column;">
@@ -52,6 +57,7 @@
         let pc = null;
         let ws = null;
         let currentSource = 'camera';
+        let audioEnabled = true;
 
         // ICE servers configuration
         const configuration = {
@@ -66,6 +72,7 @@
         const remoteVideo = document.getElementById('remoteVideo');
         const cameraBtn = document.getElementById('cameraBtn');
         const screenBtn = document.getElementById('screenBtn');
+        const audioControl = document.getElementById('audioControl');
 
         async function init() {
             try {
@@ -74,8 +81,11 @@
                 // Create RTCPeerConnection
                 pc = new RTCPeerConnection(configuration);
 
+                // Add transceivers for both audio and video
+                pc.addTransceiver('video', { direction: 'sendrecv' });
+                pc.addTransceiver('audio', { direction: 'sendrecv' });
+
                 // Add local tracks to peer connection
-                pc.addTransceiver('video', { direction: 'sendrecv' })
                 localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
                 // Set up event handlers for the peer connection
@@ -107,7 +117,7 @@
                 // Get user media (camera and microphone)
                 localStream = await navigator.mediaDevices.getUserMedia({
                     video: true,
-                    audio: true
+                    audio: audioEnabled
                 });
                 localVideo.srcObject = localStream;
                 currentSource = 'camera';
@@ -128,13 +138,30 @@
                 }
 
                 // Get screen sharing stream
-                localStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: true,
-                    audio: true
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true
                 });
 
+                // If audio is enabled, we need to get audio separately from getUserMedia
+                // since getDisplayMedia may not include audio on all browsers
+                if (audioEnabled) {
+                    try {
+                        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        // Combine the screen video track with the audio track
+                        localStream = new MediaStream([
+                            ...screenStream.getVideoTracks(),
+                            ...audioStream.getAudioTracks()
+                        ]);
+                    } catch (e) {
+                        console.warn('Could not get audio track:', e);
+                        localStream = screenStream;
+                    }
+                } else {
+                    localStream = screenStream;
+                }
+
                 // Add handler for when user stops sharing
-                localStream.getVideoTracks()[0].addEventListener('ended', () => {
+                screenStream.getVideoTracks()[0].addEventListener('ended', () => {
                     console.log('Screen sharing ended by user');
                     startCamera();
                 });
@@ -157,20 +184,57 @@
 
             const senders = pc.getSenders();
 
-            localStream.getTracks().forEach(track => {
-                const sender = senders.find(s => s.track && s.track.kind === track.kind);
-                if (sender) {
-                    sender.replaceTrack(track).catch(e => console.error('Error replacing track:', e));
+            // First, handle video and audio separately
+            const videoTrack = localStream.getVideoTracks()[0];
+            const audioTrack = localStream.getAudioTracks()[0];
+
+            if (videoTrack) {
+                const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                if (videoSender) {
+                    videoSender.replaceTrack(videoTrack).catch(e =>
+                        console.error('Error replacing video track:', e));
                 } else {
-                    pc.addTrack(track, localStream);
+                    pc.addTrack(videoTrack, localStream);
                 }
-            });
+            }
+
+            if (audioTrack) {
+                const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+                if (audioSender) {
+                    audioSender.replaceTrack(audioTrack).catch(e =>
+                        console.error('Error replacing audio track:', e));
+                } else {
+                    pc.addTrack(audioTrack, localStream);
+                }
+            }
         }
 
         function updateButtonState() {
             cameraBtn.disabled = currentSource === 'camera';
             screenBtn.disabled = currentSource === 'screen';
         }
+
+        // Toggle audio
+        audioControl.addEventListener('change', function () {
+            audioEnabled = this.checked;
+
+            // If we have an existing stream
+            if (localStream) {
+                // Toggle existing audio tracks
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = audioEnabled;
+                });
+
+                // If there are no audio tracks and we want to enable audio, restart with audio
+                if (audioEnabled && localStream.getAudioTracks().length === 0) {
+                    if (currentSource === 'camera') {
+                        startCamera();
+                    } else {
+                        startScreenShare();
+                    }
+                }
+            }
+        });
 
         // Handle ICE candidates from the peer connection
         function handleIceCandidate(event) {
@@ -188,8 +252,16 @@
 
         // Handle tracks from the remote peer
         function handleTrack(event) {
-            console.log('Received remote track:', event.track);
-            remoteVideo.srcObject = event.streams[0];
+            console.log('Received remote track:', event.track.kind);
+
+            // Make sure we create remote stream if it doesn't exist
+            if (!remoteStream) {
+                remoteStream = new MediaStream();
+                remoteVideo.srcObject = remoteStream;
+            }
+
+            // Add this track to our remote stream
+            remoteStream.addTrack(event.track);
         }
 
         // Handle connection state changes

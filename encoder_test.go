@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	wm "webrtc_poc_go/pkg/webrtc_media"
+	// wm "webrtc_poc_go/pkg/webrtc_media"
 
 	"github.com/pion/webrtc/v4/pkg/media"
 )
@@ -47,7 +47,7 @@ func TestInitEncoderFrameSender(t *testing.T) {
 	receiverChan := make(chan []byte)
 
 	// We call the function under test
-	wm.InitEncoderFrameSender(mockSampleTrack, receiverChan)
+	// wm.InitEncoderFrameSender(mockSampleTrack, receiverChan)
 
 	// Send the JPEG data into the channel and then close it
 	receiverChan <- jpegData

@@ -154,6 +154,9 @@ func (g *GrpcServerManager) StreamImage(imageData []byte, isKeyFrame bool) {
 
 func (g *GrpcServerManager) Close() {
 	log.Printf("Closing gRPC connection")
+	if g == nil {
+		return
+	}
 	g.stream.CloseSend()
 	g.connection.Close()
 	if g.cancel != nil {

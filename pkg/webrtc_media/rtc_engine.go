@@ -83,7 +83,11 @@ func NewWebRTCEngine() *WebRTCEngine {
 	}
 	i := &interceptor.Registry{}
 
+	intervalPliFactory, err := intervalpli.NewReceiverInterceptor(
+	// intervalpli.GeneratorInterval(time.Second * 6),
+	)
 	// Use the default set of Interceptors
+	i.Add(intervalPliFactory)
 	if err := webrtc.RegisterDefaultInterceptors(&w.mediaEngine, i); err != nil {
 		panic(err)
 	}
@@ -91,13 +95,9 @@ func NewWebRTCEngine() *WebRTCEngine {
 	// 	return err
 	// }
 
-	intervalPliFactory, err := intervalpli.NewReceiverInterceptor(
-	// intervalpli.GeneratorInterval(time.Second * 6),
-	)
 	if err != nil {
 		panic(err)
 	}
-	i.Add(intervalPliFactory)
 	// Create API with MediaEngine
 	w.api = webrtc.NewAPI(webrtc.WithMediaEngine(&w.mediaEngine), webrtc.WithInterceptorRegistry(i))
 	return w
@@ -217,48 +217,6 @@ func (s *WebRTCEngine) handleIncomingTrackWithGRPC(t *webrtc.TrackRemote, stop c
 			}
 		}
 	}
-}
-
-func isH264KeyFrame(sampleData []byte) bool {
-	// Define NAL unit start codes
-	startCode3 := []byte{0x00, 0x00, 0x01}
-	startCode4 := []byte{0x00, 0x00, 0x00, 0x01}
-
-	// Search for NAL units in the sample data
-	offset := 0
-	for offset < len(sampleData) {
-		// Find the next start code
-		start := bytes.Index(sampleData[offset:], startCode3)
-		startCodeLength := 3
-		if start == -1 {
-			start = bytes.Index(sampleData[offset:], startCode4)
-			startCodeLength = 4
-		}
-		if start == -1 {
-			break
-		}
-		start += offset
-
-		// Determine the start of the NAL unit
-		nalStart := start + startCodeLength
-		if nalStart >= len(sampleData) {
-			break
-		}
-
-		// Read the NAL unit header byte
-		nalHeader := sampleData[nalStart]
-		nalUnitType := nalHeader & 0x1F
-
-		// Check if it's an IDR frame (NAL unit type 5)
-		if nalUnitType == 5 {
-			return true
-		}
-
-		// Move to the next NAL unit
-		offset = nalStart + 1
-	}
-
-	return false
 }
 
 // func initEncoderFrameSender(videoTrack *webrtc.TrackLocalStaticSample, receiverChan chan []byte) {

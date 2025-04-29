@@ -33,8 +33,10 @@ func NewPeersManager() *PeersManager {
 }
 
 func init() {
+	fmt.Printf("WebRTCEngine. creating one!")
 	webrtcEngine = NewWebRTCEngine()
 }
+
 func NewWebRTCPeer(id string) *WebRTCPeer {
 	return &WebRTCPeer{
 		ID:   id,

@@ -28,12 +28,10 @@ func (s *WebRTCEngine) createSimpleEchoSender(offer webrtc.SessionDescription, p
 	// Add transceivers for video in sendrecv mode
 	videoTransceiver, err := (*pc).AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
-		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv},
 	)
 	if err != nil {
 		return webrtc.SessionDescription{}, err
 	}
-	// fmt.Println("Processed data:")
 
 	// Handle incoming tracks with simple echo back
 	(*pc).OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -46,7 +44,7 @@ func (s *WebRTCEngine) createSimpleEchoSender(offer webrtc.SessionDescription, p
 
 		// Create a local video track to send back data
 		fmt.Println("Create local video track (echo mode)")
-		localVideoTrack, err := webrtc.NewTrackLocalStaticSample(t.Codec().RTPCodecCapability, t.ID(), t.StreamID())
+		localVideoTrack, err := webrtc.NewTrackLocalStaticSample(t.Codec().RTPCodecCapability, "t.ID()", "t.StreamID()")
 		if err != nil {
 			fmt.Println("Failed to create local video track:", err)
 			return
@@ -96,7 +94,7 @@ func (s *WebRTCEngine) handleSimpleEchoTrack(t *webrtc.TrackRemote, stop chan in
 		pkt = &codecs.H264Packet{}
 	}
 
-	builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)
+	builder := samplebuilder.New(350, pkt, t.Codec().ClockRate)
 
 	go func() {
 		for {
@@ -109,13 +107,15 @@ func (s *WebRTCEngine) handleSimpleEchoTrack(t *webrtc.TrackRemote, stop chan in
 					fmt.Println("ReadRTP error:", err.Error())
 					return
 				}
+
 				builder.Push(rtpPacket)
 
 				for sample := builder.Pop(); sample != nil; sample = builder.Pop() {
 					// Process VP8 frames with watermark
 					if s.watermark != nil && t.Codec().MimeType == webrtc.MimeTypeVP8 {
 						// fmt.Println("Processing VP8 frame with watermark, data size:", len(sample.Data))
-						processedData, err := s.processVP8FrameWithWatermark(sample.Data, sample.Duration)
+						processedData := sample.Data
+						// processedData, err := s.processVP8FrameWithWatermark(sample.Data, sample.Duration)
 						if err == nil {
 							// Use processed data with watermark
 							processedSample := media.Sample{

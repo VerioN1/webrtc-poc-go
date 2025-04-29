@@ -6,6 +6,7 @@ services:
     restart: always
     ports:
       - "9912:9912"
+      - "10000-10010:10000-10010/udp"
     volumes:
       - .:/app
     environment:

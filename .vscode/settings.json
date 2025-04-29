@@ -1,3 +1,11 @@
 {
-    "liveServer.settings.port": 5501
+    "liveServer.settings.port": 5501,
+    "liveServer.settings.ignoreFiles": [
+        "**/*.css",
+        "**/*.ivf",
+        "output.ivf*",
+        "/output/**/*",
+        "output/**/*.jpeg*",
+        "**/*.jpeg*",
+    ]
 }
