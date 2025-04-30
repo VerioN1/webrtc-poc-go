@@ -417,8 +417,8 @@ func (co *PeerConnection) GatherIncomingTracks(ctx context.Context) ([]*Incoming
 
 		case pair := <-co.incomingTrack:
 			t := &IncomingTrack{
-				track:     pair.track,
-				receiver:  pair.receiver,
+				Track:     pair.track,
+				Receiver:  pair.receiver,
 				writeRTCP: co.wr.WriteRTCP,
 				log:       co.Log,
 			}

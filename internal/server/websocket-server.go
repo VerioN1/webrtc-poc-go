@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"webrtc_poc_go/internal/protocols/webrtc"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -202,11 +203,16 @@ func (s *WebSocketServer) handleOffer(client *wsClient, sdp string) {
 		log.Printf("Connection state changed for %s: %s", client.uuid, state.String())
 	})
 
+	incomingTracks := []*webrtc.IncomingTrack{}
 	// Handle incoming tracks
 	pc.OnTrack(func(t *pwebrtc.TrackRemote, receiver *pwebrtc.RTPReceiver) {
 		log.Printf("OnTrack received track (echo mode): %s, codec: %s", t.ID(), t.Codec().MimeType)
 
 		// Choose the appropriate transceiver based on track type
+		incomingTracks = append(incomingTracks, &webrtc.IncomingTrack{
+			Track:    t,
+			Receiver: receiver,
+		})
 		var transceiver *pwebrtc.RTPTransceiver
 		if t.Kind() == pwebrtc.RTPCodecTypeVideo {
 			transceiver = videoTransceiver
@@ -315,6 +321,20 @@ func (s *WebSocketServer) handleOffer(client *wsClient, sdp string) {
 	if err := client.safeWS.Send(msg); err != nil {
 		log.Printf("Failed to send answer: %v", err)
 	}
+
+	// Create a stream instance that saves to files
+	fileStream := &FileOutputMediaStream{
+		outputDir: "output",
+	}
+
+	// Apply ToStream to process media
+	medias, err := webrtc.ToStream(pc, &fileStream)
+	if err != nil {
+		log.Printf("Failed to map WebRTC to stream: %v", err)
+		return
+	}
+
+	log.Printf("Successfully mapped %d media tracks for saving", len(medias))
 }
 
 func (s *WebSocketServer) handleCandidate(client *wsClient, candidate pwebrtc.ICECandidateInit) {

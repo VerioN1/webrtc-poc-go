@@ -229,8 +229,8 @@ var incomingAudioCodecs = []webrtc.RTPCodecParameters{
 type IncomingTrack struct {
 	OnPacketRTP func(*rtp.Packet)
 
-	track     *webrtc.TrackRemote
-	receiver  *webrtc.RTPReceiver
+	Track     *webrtc.TrackRemote
+	Receiver  *webrtc.RTPReceiver
 	writeRTCP func([]rtcp.Packet) error
 	log       logger.Writer
 }
@@ -241,7 +241,7 @@ func (t *IncomingTrack) initialize() {
 
 // ClockRate returns the clock rate. Needed by rtptime.GlobalDecoder
 func (t *IncomingTrack) ClockRate() int {
-	return int(t.track.Codec().ClockRate)
+	return int(t.Track.Codec().ClockRate)
 }
 
 // PTSEqualsDTS returns whether PTS equals DTS. Needed by rtptime.GlobalDecoder
@@ -254,7 +254,7 @@ func (t *IncomingTrack) start() {
 	go func() {
 		buf := make([]byte, 1500)
 		for {
-			_, _, err := t.receiver.Read(buf)
+			_, _, err := t.Receiver.Read(buf)
 			if err != nil {
 				return
 			}
@@ -262,7 +262,7 @@ func (t *IncomingTrack) start() {
 	}()
 
 	// send period key frame requests
-	if t.track.Kind() == webrtc.RTPCodecTypeVideo {
+	if t.Track.Kind() == webrtc.RTPCodecTypeVideo {
 		go func() {
 			keyframeTicker := time.NewTicker(keyFrameInterval)
 			defer keyframeTicker.Stop()
@@ -270,7 +270,7 @@ func (t *IncomingTrack) start() {
 			for range keyframeTicker.C {
 				err := t.writeRTCP([]rtcp.Packet{
 					&rtcp.PictureLossIndication{
-						MediaSSRC: uint32(t.track.SSRC()),
+						MediaSSRC: uint32(t.Track.SSRC()),
 					},
 				})
 				if err != nil {
@@ -285,7 +285,7 @@ func (t *IncomingTrack) start() {
 		reorderer := rtpreorderer.New()
 
 		for {
-			pkt, _, err := t.track.ReadRTP()
+			pkt, _, err := t.Track.ReadRTP()
 			if err != nil {
 				return
 			}

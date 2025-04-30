@@ -15,59 +15,59 @@ import (
 )
 
 // ToStream maps a WebRTC connection to a MediaMTX stream.
-func ToStream(pc *PeerConnection, stream **stream.Stream) ([]*description.Media, error) {
+func ToStream(incomingTracks []*IncomingTrack, stream **stream.Stream) ([]*description.Media, error) {
 	var medias []*description.Media //nolint:prealloc
 	timeDecoder := rtptime.NewGlobalDecoder()
 
-	for _, track := range pc.incomingTracks {
+	for _, track := range incomingTracks {
 		var typ description.MediaType
 		var forma format.Format
 
-		switch strings.ToLower(track.track.Codec().MimeType) {
+		switch strings.ToLower(track.Track.Codec().MimeType) {
 		case strings.ToLower(webrtc.MimeTypeAV1):
 			typ = description.MediaTypeVideo
 			forma = &format.AV1{
-				PayloadTyp: uint8(track.track.PayloadType()),
+				PayloadTyp: uint8(track.Track.PayloadType()),
 			}
 
 		case strings.ToLower(webrtc.MimeTypeVP9):
 			typ = description.MediaTypeVideo
 			forma = &format.VP9{
-				PayloadTyp: uint8(track.track.PayloadType()),
+				PayloadTyp: uint8(track.Track.PayloadType()),
 			}
 
 		case strings.ToLower(webrtc.MimeTypeVP8):
 			typ = description.MediaTypeVideo
 			forma = &format.VP8{
-				PayloadTyp: uint8(track.track.PayloadType()),
+				PayloadTyp: uint8(track.Track.PayloadType()),
 			}
 
 		case strings.ToLower(webrtc.MimeTypeH265):
 			typ = description.MediaTypeVideo
 			forma = &format.H265{
-				PayloadTyp: uint8(track.track.PayloadType()),
+				PayloadTyp: uint8(track.Track.PayloadType()),
 			}
 
 		case strings.ToLower(webrtc.MimeTypeH264):
 			typ = description.MediaTypeVideo
 			forma = &format.H264{
-				PayloadTyp:        uint8(track.track.PayloadType()),
+				PayloadTyp:        uint8(track.Track.PayloadType()),
 				PacketizationMode: 1,
 			}
 
 		case strings.ToLower(mimeTypeMultiopus):
 			typ = description.MediaTypeAudio
 			forma = &format.Opus{
-				PayloadTyp:   uint8(track.track.PayloadType()),
-				ChannelCount: int(track.track.Codec().Channels),
+				PayloadTyp:   uint8(track.Track.PayloadType()),
+				ChannelCount: int(track.Track.Codec().Channels),
 			}
 
 		case strings.ToLower(webrtc.MimeTypeOpus):
 			typ = description.MediaTypeAudio
 			forma = &format.Opus{
-				PayloadTyp: uint8(track.track.PayloadType()),
+				PayloadTyp: uint8(track.Track.PayloadType()),
 				ChannelCount: func() int {
-					if strings.Contains(track.track.Codec().SDPFmtpLine, "stereo=1") {
+					if strings.Contains(track.Track.Codec().SDPFmtpLine, "stereo=1") {
 						return 2
 					}
 					return 1
@@ -79,7 +79,7 @@ func ToStream(pc *PeerConnection, stream **stream.Stream) ([]*description.Media,
 			forma = &format.G722{}
 
 		case strings.ToLower(webrtc.MimeTypePCMU):
-			channels := int(track.track.Codec().Channels)
+			channels := int(track.Track.Codec().Channels)
 			if channels == 0 {
 				channels = 1
 			}
@@ -98,7 +98,7 @@ func ToStream(pc *PeerConnection, stream **stream.Stream) ([]*description.Media,
 			}
 
 		case strings.ToLower(webrtc.MimeTypePCMA):
-			channels := int(track.track.Codec().Channels)
+			channels := int(track.Track.Codec().Channels)
 			if channels == 0 {
 				channels = 1
 			}
@@ -119,14 +119,14 @@ func ToStream(pc *PeerConnection, stream **stream.Stream) ([]*description.Media,
 		case strings.ToLower(mimeTypeL16):
 			typ = description.MediaTypeAudio
 			forma = &format.LPCM{
-				PayloadTyp:   uint8(track.track.PayloadType()),
+				PayloadTyp:   uint8(track.Track.PayloadType()),
 				BitDepth:     16,
-				SampleRate:   int(track.track.Codec().ClockRate),
-				ChannelCount: int(track.track.Codec().Channels),
+				SampleRate:   int(track.Track.Codec().ClockRate),
+				ChannelCount: int(track.Track.Codec().Channels),
 			}
 
 		default:
-			return nil, fmt.Errorf("unsupported codec: %+v", track.track.Codec().RTPCodecCapability)
+			return nil, fmt.Errorf("unsupported codec: %+v", track.Track.Codec().RTPCodecCapability)
 		}
 
 		medi := &description.Media{
