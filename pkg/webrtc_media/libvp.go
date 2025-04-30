@@ -117,7 +117,7 @@ func (d *vp8Decoder) decode(au []byte) (*image.RGBA, error) {
 	pkt.size = (C.int)(len(au))
 	res := C.avcodec_send_packet(d.codecCtx, &pkt)
 	p.Unpin()
-	fmt.Println("avcodec_send_packet() res:", res)
+	// fmt.Println("avcodec_send_packet() res:", res)
 	if res < 0 {
 		return nil, nil
 	}

@@ -69,15 +69,28 @@ func NewWebRTCEngine() *WebRTCEngine {
 
 	if err := w.mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP8,
-			ClockRate:   90000,
-			Channels:    0,
-			SDPFmtpLine: "",
+			MimeType:  webrtc.MimeTypeVP8,
+			ClockRate: 90000,
+			// Channels:    0,
+			// SDPFmtpLine: "",
 			// SDPFmtpLine:  "profile-level-id=42e01f;packetization-mode=1",
-			RTCPFeedback: nil,
+			// RTCPFeedback: nil,
 		},
 		PayloadType: 96,
 		// PayloadType: 102,
+	}, webrtc.RTPCodecTypeVideo); err != nil {
+		panic(err)
+	}
+
+	if err := w.mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:     "video/rtx",
+			ClockRate:    90000,
+			Channels:     0,
+			SDPFmtpLine:  fmt.Sprintf("apt=%d", 96),
+			RTCPFeedback: nil,
+		},
+		PayloadType: webrtc.PayloadType(96 + 1),
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		panic(err)
 	}
