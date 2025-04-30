@@ -3,13 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
-	"os/signal"
+	"time"
 
 	// "time"
-	server "webrtc_poc_go/internal/server"
 
 	grpcService "webrtc_poc_go/pkg/grpc_server"
 	"webrtc_poc_go/pkg/webrtc_media"
@@ -171,36 +168,37 @@ func createPeerConnection() (*webrtc.PeerConnection, error) {
 	return peerConnection, nil
 }
 
-// func main() {
-// 	// Wrap the server in a loop to restart if it fails
-// 	for {
-// 		// Set up the HTTP server
-// 		http.Handle("/", http.FileServer(http.Dir(".")))
-// 		http.HandleFunc("/ws", websocketServer)
-
-//			fmt.Println("Server starting on :9912")
-//			err := http.ListenAndServe(":9912", nil)
-//			if err != nil {
-//				fmt.Println("Server encountered an error:", err)
-//				// Wait before restarting
-//				time.Sleep(5 * time.Second)
-//				fmt.Println("Restarting server...")
-//				// The loop will restart the server
-//			}
-//		}
-//	}
 func main() {
-	server := server.NewWebSocketServer(":9912")
-	log.Println("Starting server...")
-	err := server.Start()
-	if err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// Wrap the server in a loop to restart if it fails
+	for {
+		// Set up the HTTP server
+		http.Handle("/", http.FileServer(http.Dir(".")))
+		http.HandleFunc("/ws", websocketServer)
+
+		fmt.Println("Server starting on :9912")
+		err := http.ListenAndServe(":9912", nil)
+		if err != nil {
+			fmt.Println("Server encountered an error:", err)
+			// Wait before restarting
+			time.Sleep(5 * time.Second)
+			fmt.Println("Restarting server...")
+			// The loop will restart the server
+		}
 	}
-
-	// Wait for termination signal
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	<-c
-
-	server.Stop()
 }
+
+// func main() {
+// 	server := server.NewWebSocketServer(":9912")
+// 	log.Println("Starting server...")
+// 	err := server.Start()
+// 	if err != nil {
+// 		log.Fatalf("Failed to start server: %v", err)
+// 	}
+
+// 	// Wait for termination signal
+// 	c := make(chan os.Signal, 1)
+// 	signal.Notify(c, os.Interrupt)
+// 	<-c
+
+// 	server.Stop()
+// }
