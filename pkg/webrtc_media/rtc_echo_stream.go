@@ -8,6 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
+	// fffff "webrtc_poc_go/internal"
+	"webrtc_poc_go/internal/formats/vp8"
+
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -36,7 +40,27 @@ func (s *WebRTCEngine) createSimpleEchoSender(offer webrtc.SessionDescription, p
 		if err != nil {
 			return
 		}
+		go func() {
+			for {
+				rtcpPackets, _, rtcpErr := videoTransceiver.Sender().ReadRTCP()
+				if rtcpErr != nil {
+					return
+				}
 
+				for _, r := range rtcpPackets {
+					if _, isPLI := r.(*rtcp.PictureLossIndication); isPLI {
+						fmt.Println("Sending PLI")
+						if sendErr := (*pc).WriteRTCP([]rtcp.Packet{
+							&rtcp.PictureLossIndication{
+								MediaSSRC: uint32(t.SSRC()),
+							},
+						}); sendErr != nil {
+							return
+						}
+					}
+				}
+			}
+		}()
 		if err := videoTransceiver.Sender().ReplaceTrack(localVideoTrack); err != nil {
 			return
 		}
@@ -61,18 +85,18 @@ func (s *WebRTCEngine) createSimpleEchoSender(offer webrtc.SessionDescription, p
 }
 
 // initVP8Decoder creates and initializes a VP8 decoder
-func (s *WebRTCEngine) initVP8Decoder() (*vp8Decoder, error) {
-	decoder := &vp8Decoder{}
-	if err := decoder.initialize(); err != nil {
+func (s *WebRTCEngine) initVP8Decoder() (*vp8.Vp8Decoder, error) {
+	decoder := &vp8.Vp8Decoder{}
+	if err := decoder.Initialize(); err != nil {
 		return nil, err
 	}
 	return decoder, nil
 }
 
 // processAndSaveFrame decodes VP8 frame and saves it as JPEG
-func (s *WebRTCEngine) processAndSaveFrame(decoder *vp8Decoder, frameData []byte, outputDir string, frameIndex int) error {
+func (s *WebRTCEngine) processAndSaveFrame(decoder *vp8.Vp8Decoder, frameData []byte, outputDir string, frameIndex int) error {
 	// Decode the frame
-	img, err := decoder.decode(frameData)
+	img, err := decoder.Decode(frameData)
 	if err != nil || img == nil {
 		return err
 	}
@@ -109,7 +133,7 @@ func (s *WebRTCEngine) handleSimpleEchoTrack(t *webrtc.TrackRemote, stop chan in
 	if err != nil {
 		return
 	}
-	defer vp8Dec.close()
+	defer vp8Dec.Close()
 
 	// Start frame processing goroutine
 	go func() {

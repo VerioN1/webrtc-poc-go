@@ -1,4 +1,4 @@
-package webrtc_media
+package vp8
 
 import (
 	"fmt"
@@ -21,8 +21,8 @@ func frameLineSize(frame *C.AVFrame) *C.int {
 	return (*C.int)(unsafe.Pointer(&frame.linesize[0]))
 }
 
-// vp8Decoder is a wrapper around FFmpeg's VP8 decoder.
-type vp8Decoder struct {
+// Vp8Decoder is a wrapper around FFmpeg's VP8 decoder.
+type Vp8Decoder struct {
 	codecCtx     *C.AVCodecContext
 	yuv420Frame  *C.AVFrame
 	rgbaFrame    *C.AVFrame
@@ -31,7 +31,7 @@ type vp8Decoder struct {
 }
 
 // initialize initializes a vp8Decoder.
-func (d *vp8Decoder) initialize() error {
+func (d *Vp8Decoder) Initialize() error {
 	codec := C.avcodec_find_decoder(C.AV_CODEC_ID_VP8)
 	if codec == nil {
 		return fmt.Errorf("avcodec_find_decoder() failed")
@@ -57,8 +57,8 @@ func (d *vp8Decoder) initialize() error {
 	return nil
 }
 
-// close closes the decoder.
-func (d *vp8Decoder) close() {
+// Close closes the decoder.
+func (d *Vp8Decoder) Close() {
 	if d.swsCtx != nil {
 		C.sws_freeContext(d.swsCtx)
 	}
@@ -71,7 +71,7 @@ func (d *vp8Decoder) close() {
 	C.avcodec_close(d.codecCtx)
 }
 
-func (d *vp8Decoder) reinitDynamicStuff() error {
+func (d *Vp8Decoder) reinitDynamicStuff() error {
 	if d.swsCtx != nil {
 		C.sws_freeContext(d.swsCtx)
 	}
@@ -107,7 +107,7 @@ func (d *vp8Decoder) reinitDynamicStuff() error {
 }
 
 // decode decodes a RGBA image from VP8.
-func (d *vp8Decoder) decode(au []byte) (*image.RGBA, error) {
+func (d *Vp8Decoder) Decode(au []byte) (*image.RGBA, error) {
 	// send access unit to decoder
 	var pkt C.AVPacket
 	ptr := &au[0]
