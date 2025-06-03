@@ -25,7 +25,7 @@ func DecodeVP9AndWriteYUV(sampleChan <-chan *media.Sample, grpcInstnc *grpc_serv
 	go func() {
 		for frameData := range frameChan {
 			// Move StreamImage call here so decoding isn't blocked by Send()
-			grpcInstnc.StreamImage(frameData, true)
+			grpcInstnc.ReceiverChan <- frameData
 		}
 	}()
 

@@ -6,6 +6,7 @@ services:
     restart: always
     ports:
       - "9912:9912"
+      - "50061:50061"
     volumes:
       - .:/app
     environment:

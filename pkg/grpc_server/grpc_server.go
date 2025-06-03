@@ -4,146 +4,106 @@ import (
 	"context"
 	"io"
 	"log"
-	"time"
+	"net"
 	pb "webrtc_poc_go/pkg/protos"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type GrpcServerManager struct {
 	ReceiverChan chan []byte
-	stream       pb.ImageService_StreamImageClient
-	client       pb.ImageServiceClient
-	connection   *grpc.ClientConn
+	server       *grpc.Server
+	listener     net.Listener
 	cancel       context.CancelFunc
 }
 
-// func runImageService(client pb.ImageServiceClient) {
-// 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
-// 	defer cancel()
+// VideoOutputServer implements the gRPC server for receiving video frames
+type VideoOutputServer struct {
+	pb.UnimplementedVideoOutputServer
+	frameReceiver chan []byte
+}
 
-// 	// Call the streaming API
-// 	stream, err := client.StreamImage(ctx)
-// 	if err != nil {
-// 		log.Fatalf("opennstream error: %v", err)
-// 	}
+// OutputVideoStream handles incoming video stream from clients
+func (s *VideoOutputServer) OutputVideoStream(stream grpc.ClientStreamingServer[pb.Request, pb.Response]) error {
+	log.Println("Client connected to video stream")
 
-// 	waitc := make(chan struct{})
-// 	go func() {
-// 		defer close(waitc)
-// 		imageCount := 0
-// 		for {
-// 			in, err := stream.Recv()
-// 			if err == io.EOF {
-// 				// Server has closed the stream
-// 				log.Println("Server closed the stream")
-// 				return
-// 			}
-// 			if err != nil {
-// 				log.Fatalf("Failed to receive image: %v", err)
-// 			}
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			log.Println("Client closed the stream")
+			// Send final response when client is done
+			return stream.SendAndClose(&pb.Response{})
+		}
+		if err != nil {
+			log.Printf("Error receiving frame: %v", err)
+			return err
+		}
 
-// 			// Save the received image
-// 			imageCount++
-// 			filename := fmt.Sprintf("received_image_%d.jpg", imageCount)
-// 			err = os.WriteFile(filename, in.Image.ImageData, 0644)
-// 			if err != nil {
-// 				log.Printf("Failed to save received image: %v", err)
-// 				continue
-// 			}
-// 			log.Printf("Saved received image to %s", filename)
-// 		}
-// 	}()
-
-// 	imagePath := "pkg/testing.jpg"
-// 	imageData, err := os.ReadFile(imagePath)
-// 	if err != nil {
-// 		log.Fatalf("Failed to read image file: %v", err)
-// 	}
-
-// 	images := []*pb.StreamImageRequest{
-// 		{Image: &pb.Image{ImageData: imageData}},
-// 		{Image: &pb.Image{ImageData: imageData}},
-// 		{Image: &pb.Image{ImageData: imageData}},
-// 		{Image: &pb.Image{ImageData: imageData}},
-// 	}
-
-// 	for _, note := range images {
-// 		log.Println("Sending image to server")
-// 		if err := stream.Send(note); err != nil {
-// 			log.Fatalf("client.RouteChat: stream.Send(%v) failed: %v", note, err)
-// 		}
-// 	}
-
-// 	stream.CloseSend()
-// 	if err != nil {
-// 		log.Fatalf("Failed t send image: %v", err)
-// 	}
-// 	log.Println("Sent image to server")
-
-// 	<-waitc
-// 	log.Println("Client has finished receiving images")
-// }
+		// Send the received frame to the channel
+		select {
+		case s.frameReceiver <- req.Frame:
+			log.Printf("Received frame of size: %d bytes", len(req.Frame))
+		default:
+			log.Println("Frame receiver channel is full, dropping frame")
+		}
+	}
+}
 
 func InitRpcConnection(wsContext context.Context) *GrpcServerManager {
 	ctx, cancel := context.WithCancel(wsContext)
-	// Remove defer cancel() here
 
-	conn, err := grpc.NewClient("172.27.57.33:50052", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	lis, err := net.Listen("tcp", ":50061")
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+		log.Printf("Failed to listen on port 50052: %v", err)
+		cancel()
+		return nil
 	}
 
-	client := pb.NewImageServiceClient(conn)
+	// Create gRPC server
+	server := grpc.NewServer()
 
-	GrpcResponseChan := make(chan []byte)
-	// Call the streaming API
-	stream, err := client.StreamImage(ctx)
-	if err != nil {
-		log.Fatalf("StreamImage error: %v", err)
+	// Create frame receiver channel
+	frameReceiver := make(chan []byte, 100) // Buffered channel to avoid blocking
+
+	// Register the video output service
+	videoServer := &VideoOutputServer{
+		frameReceiver: frameReceiver,
 	}
+	pb.RegisterVideoOutputServer(server, videoServer)
 
+	// Start server in goroutine
 	go func() {
-		for {
-			resp, err := stream.Recv()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				log.Printf("Receive error: %v", err)
-				break
-			}
-			GrpcResponseChan <- resp.Image.ImageData
+		log.Println("Starting gRPC server on :50052")
+		if err := server.Serve(lis); err != nil {
+			log.Printf("Failed to serve gRPC: %v", err)
 		}
 	}()
+
+	// Handle context cancellation
+	go func() {
+		<-ctx.Done()
+		log.Println("Shutting down gRPC server")
+		server.GracefulStop()
+	}()
+
 	grpcManager := &GrpcServerManager{
-		ReceiverChan: GrpcResponseChan,
-		stream:       stream,
-		client:       client,
-		connection:   conn,
-		cancel:       cancel, // store cancel to close later if needed
+		ReceiverChan: frameReceiver,
+		server:       server,
+		listener:     lis,
+		cancel:       cancel,
 	}
 
 	return grpcManager
 }
 
-func (g *GrpcServerManager) StreamImage(imageData []byte, isKeyFrame bool) {
-	imageToSend := &pb.StreamImageRequest{
-		Image:      &pb.Image{ImageData: imageData},
-		IsKeyFrame: isKeyFrame,
-	}
-	startRead := time.Now()
-	if err := g.stream.Send(imageToSend); err != nil {
-		log.Printf("client.RouteChat: stream.Send failed failed: %v", err)
-	}
-	log.Printf("send to stream took %v", time.Since(startRead))
-}
-
 func (g *GrpcServerManager) Close() {
-	log.Printf("Closing gRPC connection")
-	g.stream.CloseSend()
-	g.connection.Close()
+	log.Printf("Closing gRPC server")
+	if g.server != nil {
+		g.server.GracefulStop()
+	}
+	if g.listener != nil {
+		g.listener.Close()
+	}
 	if g.cancel != nil {
 		g.cancel()
 	}

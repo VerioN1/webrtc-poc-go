@@ -167,8 +167,8 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop ch
 			pkt = &codecs.H264Packet{}
 		}
 		go DecodeVP9AndWriteYUV(sampleChan, grpcConnection)
-		InitEncoderFrameSender(videoTrack, grpcConnection.ReceiverChan)
-		builder := samplebuilder.New(3500, pkt, t.Codec().ClockRate)
+		// InitEncoderFrameSender(videoTrack, grpcConnection.ReceiverChan)
+		builder := samplebuilder.New(35000, pkt, t.Codec().ClockRate)
 		for {
 			select {
 			case <-stop:
@@ -184,11 +184,11 @@ func (s *WebRTCEngine) handleIncomingTrackWithPLI(t *webrtc.TrackRemote, stop ch
 				for sample := builder.Pop(); sample != nil; sample = builder.Pop() {
 					sampleChan <- sample
 					// Write the decoded sample back to our local video track
-					// if videoTrack != nil {
-					// 	if err := videoTrack.WriteSample(*sample); err != nil && err != io.ErrClosedPipe {
-					// 		fmt.Println("WriteSample error:", err.Error())
-					// 	}
-					// }
+					if videoTrack != nil {
+						if err := videoTrack.WriteSample(*sample); err != nil && err != io.ErrClosedPipe {
+							fmt.Println("WriteSample error:", err.Error())
+						}
+					}
 				}
 			}
 		}
