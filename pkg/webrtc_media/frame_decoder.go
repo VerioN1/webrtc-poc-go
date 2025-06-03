@@ -31,7 +31,7 @@ func DecodeVPAndWriteYUV(sampleChan <-chan *media.Sample, peerID string) {
 		for frameData := range frameChan {
 			// Move StreamImage call here so decoding isn't blocked by Send()
 			if grpcInstnc != nil {
-				grpcInstnc.StreamImage(frameData, true)
+				grpcInstnc.ReceiverChan <- frameData
 			}
 		}
 	}()
